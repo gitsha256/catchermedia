@@ -1,0 +1,14 @@
+[
+    {
+        "merged": "com.catcher.app-debug-51:/mipmap-xxxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.catcher.app-main-53:/mipmap-xxxhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.catcher.app-debug-51:/mipmap_ic_launcher_round.xml.flat",
+        "source": "com.catcher.app-main-53:/mipmap/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.catcher.app-debug-51:/mipmap_ic_launcher.xml.flat",
+        "source": "com.catcher.app-main-53:/mipmap/ic_launcher.xml"
+    }
+]
