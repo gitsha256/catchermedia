@@ -1,16 +1,20 @@
 package com.catcher.app.service
 
 import android.app.Notification
+import android.os.Environment
+import android.os.FileObserver
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.catcher.app.data.AppDatabase
+import com.catcher.app.data.MessageDao
 import com.catcher.app.data.MessageLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MessageNotificationListener : NotificationListenerService() {
 
@@ -18,6 +22,7 @@ class MessageNotificationListener : NotificationListenerService() {
     private val database: AppDatabase by lazy { 
         AppDatabase.getDatabase(applicationContext) 
     }
+    private val observers = mutableListOf<FileObserver>()
 
     private val targetPackages = setOf(
         "com.whatsapp",
@@ -46,6 +51,116 @@ class MessageNotificationListener : NotificationListenerService() {
         "you deleted this message",
         "message deleted"
     )
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        Log.i("MessageNotification", "Notification Listener Connected")
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        Log.w("MessageNotification", "Notification Listener Disconnected")
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        startMediaTracking()
+    }
+
+    private fun startMediaTracking() {
+        val root = Environment.getExternalStorageDirectory().absolutePath
+        val basePackages = listOf("com.whatsapp", "com.whatsapp.w4b")
+        val discoveredPaths = mutableSetOf<String>()
+
+        basePackages.forEach { pkg ->
+            val isW4b = pkg.contains("w4b")
+            val appFolderName = if (isW4b) "WhatsApp Business" else "WhatsApp"
+            val pkgRoot = File("$root/Android/media/$pkg/$appFolderName")
+
+            if (pkgRoot.exists()) {
+                // 1. Standard/Legacy Path
+                val standardPath = File(pkgRoot, "Media/${if (isW4b) "WhatsApp Business Images" else "WhatsApp Images"}")
+                addPathIfValid(standardPath, discoveredPaths)
+
+                // 2. Multi-account/Dual App Path: accounts/{id}/Media/WhatsApp Images
+                val accountsDir = File(pkgRoot, "accounts")
+                if (accountsDir.exists() && accountsDir.isDirectory) {
+                    accountsDir.listFiles()?.filter { it.isDirectory }?.forEach { accountDir ->
+                        val accountMediaPath = File(accountDir, "Media/${if (isW4b) "WhatsApp Business Images" else "WhatsApp Images"}")
+                        addPathIfValid(accountMediaPath, discoveredPaths)
+                    }
+                }
+            }
+        }
+
+        discoveredPaths.forEach { path ->
+            setupObserver(path)
+        }
+    }
+
+    private fun addPathIfValid(dir: File, set: MutableSet<String>) {
+        if (dir.exists()) {
+            set.add(dir.absolutePath)
+            val privateDir = File(dir, "Private")
+            if (privateDir.exists()) set.add(privateDir.absolutePath)
+        }
+    }
+
+    private fun setupObserver(path: String) {
+        val mask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or FileObserver.CREATE
+        val observer = object : FileObserver(path, mask) {
+            override fun onEvent(event: Int, fileName: String?) {
+                Log.v("MediaRescue", "Event detected: $event on file: $fileName in $path")
+                if (fileName != null && !fileName.startsWith(".") && 
+                    (fileName.lowercase().endsWith(".jpg") || 
+                     fileName.lowercase().endsWith(".jpeg") || 
+                     fileName.lowercase().endsWith(".png"))) {
+                    
+                    serviceScope.launch {
+                        rescueFile(path, fileName)
+                    }
+                }
+            }
+        }
+        observer.startWatching()
+        observers.add(observer)
+        Log.i("MediaRescue", "Watching directory: $path")
+    }
+
+    private suspend fun rescueFile(parentPath: String, fileName: String) {
+        try {
+            val sourceFile = File(parentPath, fileName)
+            // Small safety check: WhatsApp sometimes creates empty temp files
+            if (!sourceFile.exists() || sourceFile.length() < 100) return
+
+            val internalDir = File(applicationContext.filesDir, "rescued_media").apply { mkdirs() }
+            val destFile = File(internalDir, "rescued_${System.currentTimeMillis()}_$fileName")
+
+            // Immediate copy to secure internal storage
+            sourceFile.inputStream().use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            // Identify source package based on path
+            val sourcePkg = if (parentPath.contains("w4b")) "com.whatsapp.w4b" else "com.whatsapp"
+
+            // Log to Room as a special media entry
+            val mediaLog = MessageLog(
+                packageName = sourcePkg,
+                senderName = "Media Interceptor",
+                messageText = "Image rescued: $fileName",
+                timestamp = System.currentTimeMillis(),
+                mediaPath = destFile.absolutePath
+            )
+            database.messageDao().insertMessage(mediaLog)
+            Log.d("MediaRescue", "Successfully rescued image to ${destFile.absolutePath}")
+
+        } catch (e: Exception) {
+            Log.e("MediaRescue", "Error during file rescue", e)
+        }
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
@@ -124,6 +239,8 @@ class MessageNotificationListener : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        observers.forEach { it.stopWatching() }
+        observers.clear()
         serviceScope.cancel()
     }
 }

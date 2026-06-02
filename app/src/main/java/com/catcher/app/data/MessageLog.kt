@@ -11,9 +11,9 @@ data class MessageLog(
     val senderName: String,
     val messageText: String,
     val timestamp: Long,
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val mediaPath: String? = null
 ) {
     @Ignore
     var isSelected: Boolean = false
 }
-

@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.stateIn
 
 class MainViewModel(private val messageDao: MessageDao) : ViewModel() {
 
-    val threads: StateFlow<List<MessageLog>> = messageDao.getUniqueChatThreads()
+    val threads: StateFlow<List<MessageLog>> = messageDao.getAllThreads()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -60,13 +60,13 @@ class MainViewModel(private val messageDao: MessageDao) : ViewModel() {
 
     fun deleteThread(packageName: String, senderName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            messageDao.deleteMessagesBySender(packageName, senderName)
+            messageDao.deleteThread(packageName, senderName)
         }
     }
 
     fun clearMessages(packageName: String, senderName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            messageDao.deleteMessagesBySender(packageName, senderName)
+            messageDao.deleteThread(packageName, senderName)
         }
     }
 

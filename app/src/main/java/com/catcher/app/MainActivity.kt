@@ -1,12 +1,17 @@
 package com.catcher.app
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -35,6 +40,26 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         
         super.onCreate(savedInstanceState)
+
+        // Modern request for Media Permission
+        val requestMultiplePermissionsLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+            val granted = permissions.entries.all { it.value }
+            if (!granted) {
+                // Optional: Inform user that media rescue features may be limited
+            }
+        }
+
+        val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        if (permissionsToRequest.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
+            requestMultiplePermissionsLauncher.launch(permissionsToRequest)
+        }
 
         setContent {
             CatcherTheme {

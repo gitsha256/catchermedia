@@ -4,10 +4,11 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.catcher.app.data.MessageLog
+import com.catcher.app.data.MessageDao
 
 @Database(entities = [MessageLog::class], version = 1, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
-    
     abstract fun messageDao(): MessageDao
 
     companion object {

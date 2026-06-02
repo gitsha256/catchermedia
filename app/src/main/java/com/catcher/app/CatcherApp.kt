@@ -2,6 +2,9 @@ package com.catcher.app
 
 import android.app.Application
 import com.catcher.app.data.AppDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class CatcherApp : Application() {
     
@@ -12,7 +15,9 @@ class CatcherApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Pre-warm database instance
-        AppDatabase.getDatabase(this)
+        // Pre-warm database instance in background to avoid skipping frames on startup
+        CoroutineScope(Dispatchers.IO).launch {
+            AppDatabase.getDatabase(this@CatcherApp)
+        }
     }
 }

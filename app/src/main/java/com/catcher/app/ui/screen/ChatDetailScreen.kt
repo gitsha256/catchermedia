@@ -24,9 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.catcher.app.data.MessageLog
 import com.catcher.app.ui.theme.RoseBg
 import com.catcher.app.ui.theme.RoseError
@@ -268,6 +270,20 @@ fun MessageBubble(
                     }
                 }
                 
+                if (message.mediaPath != null) {
+                    AsyncImage(
+                        model = message.mediaPath,
+                        contentDescription = "Rescued Media",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.05f))
+                    )
+                }
+
                 Text(
                     text = message.messageText,
                     style = MaterialTheme.typography.bodyLarge,

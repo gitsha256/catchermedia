@@ -1,27 +1,10 @@
 {
     "logs": [
         {
-            "outputFile": "com.catcher.app-mergeDebugResources-49:/values-bn/values-bn.xml",
+            "outputFile": "com.catcher.app-mergeDebugResources-51:/values-bn/values-bn.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\11020aafc028db5f5b4c3780b162e5cf\\transformed\\core-1.13.1\\res\\values-bn\\values-bn.xml",
-                    "from": {
-                        "startLines": "2,3,4,5,6,7,8,9",
-                        "startColumns": "4,4,4,4,4,4,4,4",
-                        "startOffsets": "55,154,256,358,461,562,664,784",
-                        "endColumns": "98,101,101,102,100,101,119,100",
-                        "endOffsets": "149,251,353,456,557,659,779,880"
-                    },
-                    "to": {
-                        "startLines": "2,3,4,5,6,7,8,79",
-                        "startColumns": "4,4,4,4,4,4,4,4",
-                        "startOffsets": "105,204,306,408,511,612,714,8283",
-                        "endColumns": "98,101,101,102,100,101,119,100",
-                        "endOffsets": "199,301,403,506,607,709,829,8379"
-                    }
-                },
-                {
-                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\639267a435d8308edfb5e27ebcb5db16\\transformed\\ui-release\\res\\values-bn\\values-bn.xml",
+                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\52c778845c3a07e45e135973046b3640\\transformed\\ui-release\\res\\values-bn\\values-bn.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -38,7 +21,24 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\2e6f54b065d84df948c033a273cff6fa\\transformed\\material3-release\\res\\values-bn\\values-bn.xml",
+                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\7f8e6baf762c9aa10d02cda5aed9176f\\transformed\\core-1.13.1\\res\\values-bn\\values-bn.xml",
+                    "from": {
+                        "startLines": "2,3,4,5,6,7,8,9",
+                        "startColumns": "4,4,4,4,4,4,4,4",
+                        "startOffsets": "55,154,256,358,461,562,664,784",
+                        "endColumns": "98,101,101,102,100,101,119,100",
+                        "endOffsets": "149,251,353,456,557,659,779,880"
+                    },
+                    "to": {
+                        "startLines": "2,3,4,5,6,7,8,79",
+                        "startColumns": "4,4,4,4,4,4,4,4",
+                        "startOffsets": "105,204,306,408,511,612,714,8283",
+                        "endColumns": "98,101,101,102,100,101,119,100",
+                        "endOffsets": "199,301,403,506,607,709,829,8379"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\520ab19ab68f5d7bcc024df243fc4ee8\\transformed\\material3-release\\res\\values-bn\\values-bn.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -55,7 +55,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\247b14a8d2f77537c6cda1d8ad7adb25\\transformed\\foundation-release\\res\\values-bn\\values-bn.xml",
+                    "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\7a29711366f4b8fb84633fa645787499\\transformed\\foundation-release\\res\\values-bn\\values-bn.xml",
                     "from": {
                         "startLines": "2,3",
                         "startColumns": "4,4",
