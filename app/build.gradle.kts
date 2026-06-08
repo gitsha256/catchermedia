@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,9 +7,27 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Dynamic Properties Loading for signing configuration
+val properties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { properties.load(it) }
+}
+
 android {
     namespace = "com.catcher.app"
     compileSdk = 35
+
+    signingConfigs {
+        // Create a release signing configuration
+        create("release") {
+            // Safe fallbacks to avoid build crashes if properties are missing
+            storeFile = file("my-release-key.p12")
+            storePassword = properties.getProperty("RELEASE_STORE_PASSWORD") ?: ""
+            keyAlias = properties.getProperty("RELEASE_KEY_ALIAS") ?: ""
+            keyPassword = properties.getProperty("RELEASE_KEY_PASSWORD") ?: ""
+        }
+    }
 
     defaultConfig {
         applicationId = "com.catcher.app"
@@ -25,6 +45,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Link to the release signing configuration
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

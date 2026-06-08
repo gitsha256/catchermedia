@@ -1,6 +1,7 @@
 package com.catcher.app.service
 
 import android.app.Notification
+import android.media.MediaScannerConnection
 import android.os.Environment
 import android.os.FileObserver
 import android.service.notification.NotificationListenerService
@@ -13,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -99,7 +101,7 @@ class MessageNotificationListener : NotificationListenerService() {
     }
 
     private fun addPathIfValid(dir: File, set: MutableSet<String>) {
-        if (dir.exists()) {
+        if (dir.exists() && !dir.name.equals("Sent", ignoreCase = true)) {
             set.add(dir.absolutePath)
             val privateDir = File(dir, "Private")
             if (privateDir.exists()) set.add(privateDir.absolutePath)
@@ -110,7 +112,10 @@ class MessageNotificationListener : NotificationListenerService() {
         val mask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or FileObserver.CREATE
         val observer = object : FileObserver(path, mask) {
             override fun onEvent(event: Int, fileName: String?) {
-                Log.v("MediaRescue", "Event detected: $event on file: $fileName in $path")
+                // Strict guard: Ignore events if the directory being watched is a "Sent" folder
+                if (File(path).name.equals("Sent", ignoreCase = true)) return
+
+                Log.v("MediaRescue", "Event detected: $event in monitored directory")
                 if (fileName != null && !fileName.startsWith(".") && 
                     (fileName.lowercase().endsWith(".jpg") || 
                      fileName.lowercase().endsWith(".jpeg") || 
@@ -129,12 +134,15 @@ class MessageNotificationListener : NotificationListenerService() {
 
     private suspend fun rescueFile(parentPath: String, fileName: String) {
         try {
-            val sourceFile = File(parentPath, fileName)
-            // Small safety check: WhatsApp sometimes creates empty temp files
-            if (!sourceFile.exists() || sourceFile.length() < 100) return
+            // Allow the file write to complete before attempting to copy
+            delay(200)
 
-            val internalDir = File(applicationContext.filesDir, "rescued_media").apply { mkdirs() }
-            val destFile = File(internalDir, "rescued_${System.currentTimeMillis()}_$fileName")
+            val sourceFile = File(parentPath, fileName)
+            // Filter out 0-byte or tiny outgoing upload placeholders/thumbnails
+            if (!sourceFile.exists() || sourceFile.length() < 1024) return
+
+            val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "CatcherApp").apply { mkdirs() }
+            val destFile = File(publicDir, "rescued_${System.currentTimeMillis()}_$fileName")
 
             // Immediate copy to secure internal storage
             sourceFile.inputStream().use { input ->
@@ -143,19 +151,32 @@ class MessageNotificationListener : NotificationListenerService() {
                 }
             }
 
+            // Trigger MediaScanner so the file appears in Gallery/Photos apps immediately
+            MediaScannerConnection.scanFile(
+                applicationContext,
+                arrayOf(destFile.absolutePath),
+                null
+            ) { path, uri ->
+                Log.d("MediaRescue", "Media scan finished. File successfully indexed.")
+            }
+
             // Identify source package based on path
             val sourcePkg = if (parentPath.contains("w4b")) "com.whatsapp.w4b" else "com.whatsapp"
+
+            // Heuristic: Associate this file with the most recent sender from this package
+            val lastNotification = database.messageDao().findLatestMessageByPackage(sourcePkg)
+            val probableSender = lastNotification?.senderName ?: "Media Interceptor"
 
             // Log to Room as a special media entry
             val mediaLog = MessageLog(
                 packageName = sourcePkg,
-                senderName = "Media Interceptor",
-                messageText = "Image rescued: $fileName",
+                senderName = probableSender,
+                messageText = "📷 Rescued Photo ($fileName)",
                 timestamp = System.currentTimeMillis(),
                 mediaPath = destFile.absolutePath
             )
             database.messageDao().insertMessage(mediaLog)
-            Log.d("MediaRescue", "Successfully rescued image to ${destFile.absolutePath}")
+            Log.d("MediaRescue", "Successfully rescued incoming media file.")
 
         } catch (e: Exception) {
             Log.e("MediaRescue", "Error during file rescue", e)
@@ -207,8 +228,8 @@ class MessageNotificationListener : NotificationListenerService() {
                     )
 
                     if (lastMsg != null) {
-                        database.messageDao().markMessageAsDeleted(lastMsg.id)
-                        Log.d("MessageNotification", "Successfully flagged deleted message id=${lastMsg.id} from $title")
+                        database.messageDao().markMessageAsDeleted(lastMsg.id.toLong())
+                        Log.d("MessageNotification", "Flagged message as deleted (ID: ${lastMsg.id})")
                     }
                 } else {
                     // Check duplicate prevention within last 15 seconds
@@ -226,9 +247,9 @@ class MessageNotificationListener : NotificationListenerService() {
                             isDeleted = false
                         )
                         database.messageDao().insertMessage(messageLog)
-                        Log.i("MessageNotification", "Saved: [$title] $text")
+                        Log.i("MessageNotification", "New notification processed and stored locally.")
                     } else {
-                        Log.d("MessageNotification", "Skipped duplicate notification from $title")
+                        Log.d("MessageNotification", "Duplicate notification ignored.")
                     }
                 }
             } catch (e: Exception) {

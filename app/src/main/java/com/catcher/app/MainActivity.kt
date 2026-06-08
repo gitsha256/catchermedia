@@ -10,6 +10,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.BackHandler
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,7 +55,10 @@ class MainActivity : ComponentActivity() {
         val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
         } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
         }
 
         if (permissionsToRequest.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
@@ -75,6 +79,10 @@ class MainActivity : ComponentActivity() {
                         val threadState by viewModel.selectedThread.collectAsStateWithLifecycle()
                         val selected = threadState
                         if (selected != null) {
+                            BackHandler(enabled = true) {
+                                viewModel.clearSelectedThread()
+                            }
+                            
                             val messages by viewModel.messages.collectAsStateWithLifecycle()
                             ChatDetailScreen(
                                 senderName = selected.second,
@@ -95,8 +103,10 @@ class MainActivity : ComponentActivity() {
                                 onThreadClick = { packageName, senderName ->
                                     viewModel.selectThread(packageName, senderName)
                                 },
-                                onThreadDelete = { packageName, senderName ->
-                                    viewModel.deleteThread(packageName, senderName)
+                                onDeleteThreads = { threadsToDelete ->
+                                    threadsToDelete.forEach { (pkg, sender) ->
+                                        viewModel.deleteThread(pkg, sender)
+                                    }
                                 }
                             )
                         }

@@ -1,0 +1,6 @@
+# Keystore files (anywhere in the project)
+*.jks
+*.p12
+
+# Local configuration files containing private passwords
+local.properties

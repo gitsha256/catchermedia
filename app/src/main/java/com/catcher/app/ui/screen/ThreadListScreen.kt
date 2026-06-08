@@ -1,16 +1,20 @@
 package com.catcher.app.ui.screen
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,10 +35,16 @@ import java.util.*
 fun ThreadListScreen(
     threads: List<MessageLog>,
     onThreadClick: (packageName: String, senderName: String) -> Unit,
-    onThreadDelete: (packageName: String, senderName: String) -> Unit,
+    onDeleteThreads: (List<Pair<String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    val selectedKeys = remember { mutableStateListOf<String>() }
+    val isSelectionMode = selectedKeys.isNotEmpty()
+
+    BackHandler(enabled = isSelectionMode) {
+        selectedKeys.clear()
+    }
 
     val filteredThreads = remember(threads, searchQuery) {
         threads.filter {
@@ -46,38 +56,76 @@ fun ThreadListScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .statusBarsPadding() // Pushes the top of the Column down safely below the status bar
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                            Color.Transparent
+        if (isSelectionMode) {
+            TopAppBar(
+                title = { Text("${selectedKeys.size} Selected") },
+                navigationIcon = {
+                    IconButton(onClick = { selectedKeys.clear() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel")
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            val allKeys = filteredThreads.map { "${it.packageName}|${it.senderName}" }
+                            if (selectedKeys.size == allKeys.size) {
+                                selectedKeys.clear()
+                            } else {
+                                selectedKeys.clear()
+                                selectedKeys.addAll(allKeys)
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.SelectAll, contentDescription = "Select All")
+                    }
+                    IconButton(
+                        onClick = {
+                            val toDelete = selectedKeys.map { key ->
+                                val parts = key.split("|")
+                                parts[0] to parts[1]
+                            }
+                            onDeleteThreads(toDelete)
+                            selectedKeys.clear()
+                        }
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                Color.Transparent
+                            )
                         )
                     )
-                )
-                .padding(horizontal = 20.dp, vertical = 16.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Catcher",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        text = "Rescued Messages & Notifications",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Catcher",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Rescued Messages & Notifications",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -133,12 +181,14 @@ fun ThreadListScreen(
             ) {
                 items(
                     items = filteredThreads,
-                    key = { "${it.packageName}_${it.senderName}" }
+                    key = { "${it.packageName}|${it.senderName}" }
                 ) { thread ->
+                    val threadKey = "${thread.packageName}|${thread.senderName}"
+                    val isSelected = selectedKeys.contains(threadKey)
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = {
                             if (it == SwipeToDismissBoxValue.EndToStart) {
-                                onThreadDelete(thread.packageName, thread.senderName)
+                                onDeleteThreads(listOf(thread.packageName to thread.senderName))
                                 true
                             } else false
                         }
@@ -165,7 +215,20 @@ fun ThreadListScreen(
                     ) {
                         ThreadItem(
                             thread = thread,
-                            onClick = { onThreadClick(thread.packageName, thread.senderName) }
+                            isSelected = isSelected,
+                            isSelectionMode = isSelectionMode,
+                            onToggleSelection = {
+                                if (isSelected) selectedKeys.remove(threadKey)
+                                else selectedKeys.add(threadKey)
+                            },
+                            onClick = {
+                                if (isSelectionMode) {
+                                    if (isSelected) selectedKeys.remove(threadKey)
+                                    else selectedKeys.add(threadKey)
+                                } else {
+                                    onThreadClick(thread.packageName, thread.senderName)
+                                }
+                            }
                         )
                     }
                 }
@@ -174,9 +237,13 @@ fun ThreadListScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ThreadItem(
     thread: MessageLog,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    onToggleSelection: () -> Unit,
     onClick: () -> Unit
 ) {
     val isTelegram = thread.packageName.contains("telegram") || thread.packageName.contains("challegram")
@@ -185,11 +252,16 @@ fun ThreadItem(
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    if (!isSelectionMode) onToggleSelection()
+                }
+            )
     ) {
         Row(
             modifier = Modifier
@@ -197,6 +269,14 @@ fun ThreadItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (isSelectionMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onToggleSelection() },
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .size(48.dp)

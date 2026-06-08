@@ -13,7 +13,10 @@ interface MessageDao {
     suspend fun findLastMessageForDeletion(packageName: String, senderName: String, timeLimit: Long): MessageLog?
 
     @Query("UPDATE message_logs SET isDeleted = 1 WHERE id = :id")
-    suspend fun markMessageAsDeleted(id: Int)
+    suspend fun markMessageAsDeleted(id: Long)
+
+    @Query("SELECT * FROM message_logs WHERE packageName = :packageName ORDER BY timestamp DESC LIMIT 1")
+    suspend fun findLatestMessageByPackage(packageName: String): MessageLog?
 
     // Used for duplicate prevention
     @Query("SELECT * FROM message_logs WHERE packageName = :packageName AND senderName = :senderName ORDER BY timestamp DESC LIMIT 1")
