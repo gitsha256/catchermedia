@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -19,7 +20,16 @@ import kotlinx.coroutines.flow.stateIn
 
 class MainViewModel(private val messageDao: MessageDao) : ViewModel() {
 
-    val threads: StateFlow<List<MessageLog>> = messageDao.getAllThreads()
+    private val _hiddenThreads = MutableStateFlow<Set<Pair<String, String>>>(emptySet())
+
+    // Fixing B8 & B17: Filter out threads currently in the "Undo" pending state
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val threads: StateFlow<List<MessageLog>> = combine(
+        messageDao.getAllThreads(),
+        _hiddenThreads
+    ) { allThreads, hidden ->
+        allThreads.filter { (it.packageName to it.senderName) !in hidden }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -50,6 +60,14 @@ class MainViewModel(private val messageDao: MessageDao) : ViewModel() {
 
     fun clearSelectedThread() {
         _selectedThread.value = null
+    }
+
+    fun hideThreads(keys: List<Pair<String, String>>) {
+        _hiddenThreads.value = _hiddenThreads.value + keys
+    }
+
+    fun unhideThreads(keys: List<Pair<String, String>>) {
+        _hiddenThreads.value = _hiddenThreads.value - keys.toSet()
     }
 
     fun deleteMessages(messages: List<MessageLog>) {

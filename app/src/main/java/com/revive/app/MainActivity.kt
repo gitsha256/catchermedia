@@ -105,7 +105,9 @@ class MainActivity : ComponentActivity() {
                                     threadsToDelete.forEach { (pkg, sender) ->
                                         viewModel.deleteThread(pkg, sender)
                                     }
-                                }
+                                },
+                                onHideThreads = { viewModel.hideThreads(it) },
+                                onUnhideThreads = { viewModel.unhideThreads(it) }
                             )
                         }
                     }

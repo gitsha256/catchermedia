@@ -249,8 +249,8 @@ public final class MessageDao_Impl implements MessageDao {
           final int _cursorIndexOfMediaPath = CursorUtil.getColumnIndexOrThrow(_cursor, "mediaPath");
           final MessageLog _result;
           if (_cursor.moveToFirst()) {
-            final int _tmpId;
-            _tmpId = _cursor.getInt(_cursorIndexOfId);
+            final long _tmpId;
+            _tmpId = _cursor.getLong(_cursorIndexOfId);
             final String _tmpPackageName;
             _tmpPackageName = _cursor.getString(_cursorIndexOfPackageName);
             final String _tmpSenderName;
@@ -305,8 +305,8 @@ public final class MessageDao_Impl implements MessageDao {
           final int _cursorIndexOfMediaPath = CursorUtil.getColumnIndexOrThrow(_cursor, "mediaPath");
           final MessageLog _result;
           if (_cursor.moveToFirst()) {
-            final int _tmpId;
-            _tmpId = _cursor.getInt(_cursorIndexOfId);
+            final long _tmpId;
+            _tmpId = _cursor.getLong(_cursorIndexOfId);
             final String _tmpPackageName;
             _tmpPackageName = _cursor.getString(_cursorIndexOfPackageName);
             final String _tmpSenderName;
@@ -363,8 +363,8 @@ public final class MessageDao_Impl implements MessageDao {
           final int _cursorIndexOfMediaPath = CursorUtil.getColumnIndexOrThrow(_cursor, "mediaPath");
           final MessageLog _result;
           if (_cursor.moveToFirst()) {
-            final int _tmpId;
-            _tmpId = _cursor.getInt(_cursorIndexOfId);
+            final long _tmpId;
+            _tmpId = _cursor.getLong(_cursorIndexOfId);
             final String _tmpPackageName;
             _tmpPackageName = _cursor.getString(_cursorIndexOfPackageName);
             final String _tmpSenderName;
@@ -398,7 +398,7 @@ public final class MessageDao_Impl implements MessageDao {
 
   @Override
   public Flow<List<MessageLog>> getAllThreads() {
-    final String _sql = "SELECT * FROM message_logs WHERE id IN (SELECT MAX(id) FROM message_logs GROUP BY packageName, senderName) ORDER BY timestamp DESC";
+    final String _sql = "SELECT * FROM message_logs WHERE timestamp IN (SELECT MAX(timestamp) FROM message_logs GROUP BY packageName, senderName) ORDER BY timestamp DESC";
     final RoomSQLiteQuery _statement = RoomSQLiteQuery.acquire(_sql, 0);
     return CoroutinesRoom.createFlow(__db, false, new String[] {"message_logs"}, new Callable<List<MessageLog>>() {
       @Override
@@ -416,8 +416,8 @@ public final class MessageDao_Impl implements MessageDao {
           final List<MessageLog> _result = new ArrayList<MessageLog>(_cursor.getCount());
           while (_cursor.moveToNext()) {
             final MessageLog _item;
-            final int _tmpId;
-            _tmpId = _cursor.getInt(_cursorIndexOfId);
+            final long _tmpId;
+            _tmpId = _cursor.getLong(_cursorIndexOfId);
             final String _tmpPackageName;
             _tmpPackageName = _cursor.getString(_cursorIndexOfPackageName);
             final String _tmpSenderName;
@@ -477,8 +477,8 @@ public final class MessageDao_Impl implements MessageDao {
           final List<MessageLog> _result = new ArrayList<MessageLog>(_cursor.getCount());
           while (_cursor.moveToNext()) {
             final MessageLog _item;
-            final int _tmpId;
-            _tmpId = _cursor.getInt(_cursorIndexOfId);
+            final long _tmpId;
+            _tmpId = _cursor.getLong(_cursorIndexOfId);
             final String _tmpPackageName;
             _tmpPackageName = _cursor.getString(_cursorIndexOfPackageName);
             final String _tmpSenderName;

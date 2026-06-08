@@ -18,8 +18,10 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,7 +34,10 @@ import coil.compose.AsyncImage
 import com.revive.app.data.MessageLog
 import com.revive.app.ui.theme.RoseBg
 import com.revive.app.ui.theme.RoseError
-import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,8 +54,8 @@ fun ChatDetailScreen(
     val isTelegram = packageName.contains("telegram") || packageName.contains("challegram")
     val appThemeColor = if (isTelegram) Color(0xFF229ED9) else Color(0xFF25D366)
 
-    // Track selected message IDs in Compose memory
-    val selectedMessageIds = remember { mutableStateListOf<Int>() }
+    // Fixing B7: Optimized Selection State with O(1) Lookups
+    var selectedMessageIds by remember { mutableStateOf(setOf<Long>()) }
     val isSelectionModeActive = selectedMessageIds.isNotEmpty()
 
     Scaffold(
@@ -80,7 +85,7 @@ fun ChatDetailScreen(
                 },
                 navigationIcon = {
                     if (isSelectionModeActive) {
-                        IconButton(onClick = { selectedMessageIds.clear() }) {
+                        IconButton(onClick = { selectedMessageIds = emptySet() }) {
                             Icon(Icons.Default.Close, contentDescription = "Clear Selection")
                         }
                     } else {
@@ -93,8 +98,7 @@ fun ChatDetailScreen(
                     if (isSelectionModeActive) {
                         IconButton(
                             onClick = {
-                                selectedMessageIds.clear()
-                                selectedMessageIds.addAll(messages.map { it.id })
+                                selectedMessageIds = messages.map { it.id }.toSet()
                             }
                         ) {
                             Icon(Icons.Default.SelectAll, contentDescription = "Select All")
@@ -104,7 +108,7 @@ fun ChatDetailScreen(
                             onClick = {
                                 val selectedMessages = messages.filter { it.id in selectedMessageIds }
                                 onDeleteMessages(selectedMessages)
-                                selectedMessageIds.clear()
+                                selectedMessageIds = emptySet()
                             }
                         ) {
                             Icon(
@@ -143,6 +147,9 @@ fun ChatDetailScreen(
                     )
                 }
             } else {
+                // Fixing B9: Cache Date Formatter to prevent allocation churn
+                val timeFormatter = remember { DateTimeFormatter.ofPattern("hh:mm a", Locale.getDefault()) }
+                
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -151,7 +158,6 @@ fun ChatDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     reverseLayout = true
                 ) {
-                    val timeFormatter = SimpleDateFormat("hh:mm a", Locale.getDefault())
                     items(
                         items = messages,
                         key = { it.id }
@@ -161,12 +167,12 @@ fun ChatDetailScreen(
                             message = message,
                             isSelected = isSelected,
                             isSelectionModeActive = isSelectionModeActive,
-                            formatter = timeFormatter,
+                            timeFormatter = timeFormatter,
                             onToggleSelection = {
                                 if (isSelected) {
-                                    selectedMessageIds.remove(message.id)
+                                    selectedMessageIds = selectedMessageIds - message.id
                                 } else {
-                                    selectedMessageIds.add(message.id)
+                                    selectedMessageIds = selectedMessageIds + message.id
                                 }
                             }
                         )
@@ -183,7 +189,7 @@ fun MessageBubble(
     message: MessageLog,
     isSelected: Boolean,
     isSelectionModeActive: Boolean,
-    formatter: SimpleDateFormat,
+    timeFormatter: DateTimeFormatter,
     onToggleSelection: () -> Unit
 ) {
     val isDeleted = message.isDeleted
@@ -194,7 +200,12 @@ fun MessageBubble(
         isDeleted -> RoseBg
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
-    val formattedTime = remember(message.timestamp) { formatter.format(Date(message.timestamp)) }
+    
+    // Fixing B10: Use modern java.time and remember the formatted string
+    val formattedTime = remember(message.timestamp) { 
+        val localTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(message.timestamp), ZoneId.systemDefault())
+        localTime.format(timeFormatter)
+    }
 
     Column(
         modifier = Modifier

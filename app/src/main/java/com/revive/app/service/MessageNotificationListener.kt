@@ -228,7 +228,7 @@ class MessageNotificationListener : NotificationListenerService() {
                     )
 
                     if (lastMsg != null) {
-                        database.messageDao().markMessageAsDeleted(lastMsg.id.toLong())
+                        database.messageDao().markMessageAsDeleted(lastMsg.id)
                         Log.d("MessageNotification", "Flagged message as deleted (ID: ${lastMsg.id})")
                     }
                 } else {

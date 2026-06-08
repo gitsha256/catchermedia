@@ -23,7 +23,7 @@ interface MessageDao {
     suspend fun findLatestMessage(packageName: String, senderName: String): MessageLog?
 
     // Optimized: Returns the latest message for every unique chat thread
-    @Query("SELECT * FROM message_logs WHERE id IN (SELECT MAX(id) FROM message_logs GROUP BY packageName, senderName) ORDER BY timestamp DESC")
+    @Query("SELECT * FROM message_logs WHERE timestamp IN (SELECT MAX(timestamp) FROM message_logs GROUP BY packageName, senderName) ORDER BY timestamp DESC")
     fun getAllThreads(): Flow<List<MessageLog>>
 
     // Returns the full conversation for a specific sender

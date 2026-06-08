@@ -27,7 +27,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.revive.app.data.MessageLog
-import java.text.SimpleDateFormat
+import java.time.Instant
+import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,15 +39,21 @@ import java.util.*
 fun ThreadListScreen(
     threads: List<MessageLog>,
     onThreadClick: (packageName: String, senderName: String) -> Unit,
-    onDeleteThreads: (List<Pair<String, String>>) -> Unit,
+    onDeleteThreads: (List<Pair<String, String>>) -> Unit, // This now happens after Snackbar timeout
+    onHideThreads: (List<Pair<String, String>>) -> Unit,
+    onUnhideThreads: (List<Pair<String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    val selectedKeys = remember { mutableStateListOf<String>() }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    
+    // Fixing B7: Optimized Selection State with O(1) Lookups
+    var selectedKeys by remember { mutableStateOf(setOf<Pair<String, String>>()) }
     val isSelectionMode = selectedKeys.isNotEmpty()
 
     BackHandler(enabled = isSelectionMode) {
-        selectedKeys.clear()
+        selectedKeys = emptySet()
     }
 
     val filteredThreads = remember(threads, searchQuery) {
@@ -53,28 +63,25 @@ fun ThreadListScreen(
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
         if (isSelectionMode) {
             TopAppBar(
                 title = { Text("${selectedKeys.size} Selected") },
                 navigationIcon = {
-                    IconButton(onClick = { selectedKeys.clear() }) {
+                    IconButton(onClick = { selectedKeys = emptySet() }) {
                         Icon(Icons.Default.Close, contentDescription = "Cancel")
                     }
                 },
                 actions = {
                     IconButton(
                         onClick = {
-                            val allKeys = filteredThreads.map { "${it.packageName}|${it.senderName}" }
+                            val allKeys = filteredThreads.map { it.packageName to it.senderName }
                             if (selectedKeys.size == allKeys.size) {
-                                selectedKeys.clear()
+                                selectedKeys = emptySet()
                             } else {
-                                selectedKeys.clear()
-                                selectedKeys.addAll(allKeys)
+                                selectedKeys = allKeys.toSet()
                             }
                         }
                     ) {
@@ -82,12 +89,22 @@ fun ThreadListScreen(
                     }
                     IconButton(
                         onClick = {
-                            val toDelete = selectedKeys.map { key ->
-                                val parts = key.split("|")
-                                parts[0] to parts[1]
+                            val toDelete = selectedKeys.toList()
+                            onHideThreads(toDelete)
+                            selectedKeys = emptySet()
+                            
+                            scope.launch {
+                                val result = snackbarHostState.showSnackbar(
+                                    message = "${toDelete.size} threads deleted",
+                                    actionLabel = "Undo",
+                                    duration = SnackbarDuration.Short
+                                )
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    onUnhideThreads(toDelete)
+                                } else {
+                                    onDeleteThreads(toDelete)
+                                }
                             }
-                            onDeleteThreads(toDelete)
-                            selectedKeys.clear()
                         }
                     ) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = MaterialTheme.colorScheme.error)
@@ -129,7 +146,12 @@ fun ThreadListScreen(
                 }
             }
         }
-
+        },
+        modifier = modifier
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier.padding(innerPadding).fillMaxSize().background(MaterialTheme.colorScheme.background)
+        ) {
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -172,6 +194,10 @@ fun ThreadListScreen(
                 }
             }
         } else {
+            // Fixing B9/B10: Cache thread-safe formatters outside the list loop
+            val timeFormatter = remember { DateTimeFormatter.ofPattern("hh:mm a", Locale.getDefault()) }
+            val dateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd, yyyy", Locale.getDefault()) }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -181,14 +207,26 @@ fun ThreadListScreen(
             ) {
                 items(
                     items = filteredThreads,
-                    key = { "${it.packageName}|${it.senderName}" }
+                    key = { it.packageName to it.senderName }
                 ) { thread ->
-                    val threadKey = "${thread.packageName}|${thread.senderName}"
+                    val threadKey = thread.packageName to thread.senderName
                     val isSelected = selectedKeys.contains(threadKey)
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = {
                             if (it == SwipeToDismissBoxValue.EndToStart) {
-                                onDeleteThreads(listOf(thread.packageName to thread.senderName))
+                                onHideThreads(listOf(threadKey))
+                                scope.launch {
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = "Thread deleted",
+                                        actionLabel = "Undo",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        onUnhideThreads(listOf(threadKey))
+                                    } else {
+                                        onDeleteThreads(listOf(threadKey))
+                                    }
+                                }
                                 true
                             } else false
                         }
@@ -217,14 +255,16 @@ fun ThreadListScreen(
                             thread = thread,
                             isSelected = isSelected,
                             isSelectionMode = isSelectionMode,
+                            timeFormatter = timeFormatter,
+                            dateFormatter = dateFormatter,
                             onToggleSelection = {
-                                if (isSelected) selectedKeys.remove(threadKey)
-                                else selectedKeys.add(threadKey)
+                                selectedKeys = if (isSelected) selectedKeys - threadKey 
+                                else selectedKeys + threadKey
                             },
                             onClick = {
                                 if (isSelectionMode) {
-                                    if (isSelected) selectedKeys.remove(threadKey)
-                                    else selectedKeys.add(threadKey)
+                                    selectedKeys = if (isSelected) selectedKeys - threadKey 
+                                    else selectedKeys + threadKey
                                 } else {
                                     onThreadClick(thread.packageName, thread.senderName)
                                 }
@@ -232,6 +272,7 @@ fun ThreadListScreen(
                         )
                     }
                 }
+            }
             }
         }
     }
@@ -243,6 +284,8 @@ fun ThreadItem(
     thread: MessageLog,
     isSelected: Boolean,
     isSelectionMode: Boolean,
+    timeFormatter: DateTimeFormatter,
+    dateFormatter: DateTimeFormatter,
     onToggleSelection: () -> Unit,
     onClick: () -> Unit
 ) {
@@ -318,8 +361,17 @@ fun ThreadItem(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    
+                    // Fixing B10: Logic wrapped in remember to avoid per-frame calculation
+                    val timestampText = remember(thread.timestamp) {
+                        val msgTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(thread.timestamp), ZoneId.systemDefault())
+                        val now = LocalDateTime.now()
+                        if (msgTime.toLocalDate() == now.toLocalDate()) msgTime.format(timeFormatter)
+                        else msgTime.format(dateFormatter)
+                    }
+
                     Text(
-                        text = formatTimestamp(thread.timestamp),
+                        text = timestampText,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -359,20 +411,5 @@ fun ThreadItem(
                 }
             }
         }
-    }
-}
-
-fun formatTimestamp(timestamp: Long): String {
-    val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
-    val date = Date(timestamp)
-    val now = Calendar.getInstance()
-    val msgTime = Calendar.getInstance().apply { time = date }
-    
-    return if (now.get(Calendar.YEAR) == msgTime.get(Calendar.YEAR) &&
-        now.get(Calendar.DAY_OF_YEAR) == msgTime.get(Calendar.DAY_OF_YEAR)
-    ) {
-        sdf.format(date)
-    } else {
-        SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(date)
     }
 }
