@@ -1,6 +1,6 @@
-# Catcher
+# Revive
 
-Catcher is a specialized Android utility designed to intercept, log, and rescue messages and media from popular messaging applications. By utilizing Android's Notification Listener Service and File System Observers, it ensures that you have a local backup of conversations and media, even if the sender deletes them.
+Revive is a specialized Android utility designed to intercept, log, and rescue messages and media from popular messaging applications. By utilizing Android's Notification Listener Service and File System Observers, it ensures that you have a local backup of conversations and media, even if the sender deletes them.
 
 ## 🚀 Features
 
@@ -29,7 +29,7 @@ Catcher is a specialized Android utility designed to intercept, log, and rescue 
 
 ## ⚙️ Requirements & Permissions
 
-To function correctly, Catcher requires the following permissions:
+To function correctly, Revive requires the following permissions:
 
 1.  **Notification Access**: Required to read incoming notifications from messaging apps.
 2.  **Storage/Media Access**: 

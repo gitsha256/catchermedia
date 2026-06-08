@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.catcher.app"
+    package="com.revive.app"
     android:versionCode="1"
     android:versionName="1.0.0" >
 
@@ -17,13 +17,13 @@
         android:maxSdkVersion="32" />
 
     <permission
-        android:name="com.catcher.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        android:name="com.revive.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         android:protectionLevel="signature" />
 
-    <uses-permission android:name="com.catcher.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+    <uses-permission android:name="com.revive.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
     <application
-        android:name="com.catcher.app.CatcherApp"
+        android:name="com.revive.app.ReviveApp"
         android:allowBackup="true"
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
         android:extractNativeLibs="false"
@@ -33,7 +33,7 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar" >
         <activity
-            android:name="com.catcher.app.MainActivity"
+            android:name="com.revive.app.MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" >
             <intent-filter>
@@ -44,7 +44,7 @@
         </activity>
 
         <service
-            android:name="com.catcher.app.service.MessageNotificationListener"
+            android:name="com.revive.app.service.MessageNotificationListener"
             android:exported="true"
             android:label="@string/service_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" >
@@ -55,7 +55,7 @@
 
         <provider
             android:name="androidx.startup.InitializationProvider"
-            android:authorities="com.catcher.app.androidx-startup"
+            android:authorities="com.revive.app.androidx-startup"
             android:exported="false" >
             <meta-data
                 android:name="androidx.emoji2.text.EmojiCompatInitializer"

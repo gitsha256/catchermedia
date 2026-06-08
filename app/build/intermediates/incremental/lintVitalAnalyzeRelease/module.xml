@@ -1,9 +1,9 @@
 <lint-module
     format="1"
-    dir="E:\catcher\app"
+    dir="E:\revive\app"
     name=":app"
     type="APP"
-    maven="Catcher:app:unspecified"
+    maven="Revive:app:unspecified"
     agpVersion="8.5.0"
     buildFolder="build"
     bootClassPath="C:\Android\platforms\android-35\android.jar;C:\Android\build-tools\34.0.0\core-lambda-stubs.jar"

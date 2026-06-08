@@ -4,7 +4,7 @@
     "type": "APK",
     "kind": "Directory"
   },
-  "applicationId": "com.catcher.app",
+  "applicationId": "com.revive.app",
   "variantName": "release",
   "elements": [
     {

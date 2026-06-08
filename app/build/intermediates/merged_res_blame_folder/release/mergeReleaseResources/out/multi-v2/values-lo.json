@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.catcher.app-mergeReleaseResources-47:/values-lo/values-lo.xml",
+            "outputFile": "com.revive.app-mergeReleaseResources-47:/values-lo/values-lo.xml",
             "map": [
                 {
                     "source": "C:\\Users\\loki1\\.gradle\\caches\\transforms-4\\7f8e6baf762c9aa10d02cda5aed9176f\\transformed\\core-1.13.1\\res\\values-lo\\values-lo.xml",

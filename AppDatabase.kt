@@ -1,4 +1,4 @@
-package com.catcher.app.data
+package com.revive.app.data
 
 import android.content.Context
 import androidx.room.Database
@@ -19,7 +19,7 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "catcher_database"
+                    "revive_database"
                 )
                 .fallbackToDestructiveMigration()
                 .build()

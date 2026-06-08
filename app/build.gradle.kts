@@ -15,7 +15,7 @@ if (localPropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.catcher.app"
+    namespace = "com.revive.app"
     compileSdk = 35
 
     signingConfigs {
@@ -30,7 +30,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.catcher.app"
+        applicationId = "com.revive.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -40,11 +40,16 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            isShrinkResources = false
             // Link to the release signing configuration
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
