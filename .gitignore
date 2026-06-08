@@ -4,3 +4,28 @@
 
 # Local configuration files containing private passwords
 local.properties
+
+# Gradle and Build artifacts
+.gradle/
+build/
+/*/build/
+
+# IntelliJ IDEA / Android Studio files
+*.iml
+.idea/
+
+# VS Code files
+.vscode/
+
+# Generated files
+*.apk
+*.aar
+*.bundle
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+captures/
