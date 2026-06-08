@@ -1,0 +1,14 @@
+[
+    {
+        "merged": "com.revive.app-release-49:/mipmap_ic_launcher_round.xml.flat",
+        "source": "com.revive.app-main-50:/mipmap/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.revive.app-release-49:/mipmap-xxxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.revive.app-main-50:/mipmap-xxxhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.revive.app-release-49:/mipmap_ic_launcher.xml.flat",
+        "source": "com.revive.app-main-50:/mipmap/ic_launcher.xml"
+    }
+]

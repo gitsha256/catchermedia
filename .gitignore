@@ -7,8 +7,6 @@ local.properties
 
 # Gradle and Build artifacts
 .gradle/
-build/
-/*/build/
 
 # IntelliJ IDEA / Android Studio files
 *.iml
@@ -18,7 +16,6 @@ build/
 .vscode/
 
 # Generated files
-*.apk
 *.aar
 *.bundle
 
