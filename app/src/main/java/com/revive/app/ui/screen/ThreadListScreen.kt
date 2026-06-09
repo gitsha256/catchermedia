@@ -39,16 +39,14 @@ import java.util.*
 fun ThreadListScreen(
     threads: List<MessageLog>,
     onThreadClick: (packageName: String, senderName: String) -> Unit,
-    onDeleteThreads: (List<Pair<String, String>>) -> Unit, // This now happens after Snackbar timeout
-    onHideThreads: (List<Pair<String, String>>) -> Unit,
-    onUnhideThreads: (List<Pair<String, String>>) -> Unit,
+    onDeleteThreadsRequested: (List<Pair<String, String>>) -> Unit,
+    onUndoDeleteThreads: (List<Pair<String, String>>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     
-    // Fixing B7: Optimized Selection State with O(1) Lookups
     var selectedKeys by remember { mutableStateOf(setOf<Pair<String, String>>()) }
     val isSelectionMode = selectedKeys.isNotEmpty()
 
@@ -90,7 +88,7 @@ fun ThreadListScreen(
                     IconButton(
                         onClick = {
                             val toDelete = selectedKeys.toList()
-                            onHideThreads(toDelete)
+                            onDeleteThreadsRequested(toDelete)
                             selectedKeys = emptySet()
                             
                             scope.launch {
@@ -100,9 +98,7 @@ fun ThreadListScreen(
                                     duration = SnackbarDuration.Short
                                 )
                                 if (result == SnackbarResult.ActionPerformed) {
-                                    onUnhideThreads(toDelete)
-                                } else {
-                                    onDeleteThreads(toDelete)
+                                    onUndoDeleteThreads(toDelete)
                                 }
                             }
                         }
@@ -194,7 +190,6 @@ fun ThreadListScreen(
                 }
             }
         } else {
-            // Fixing B9/B10: Cache thread-safe formatters outside the list loop
             val timeFormatter = remember { DateTimeFormatter.ofPattern("hh:mm a", Locale.getDefault()) }
             val dateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd, yyyy", Locale.getDefault()) }
 
@@ -214,7 +209,7 @@ fun ThreadListScreen(
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = {
                             if (it == SwipeToDismissBoxValue.EndToStart) {
-                                onHideThreads(listOf(threadKey))
+                                onDeleteThreadsRequested(listOf(threadKey))
                                 scope.launch {
                                     val result = snackbarHostState.showSnackbar(
                                         message = "Thread deleted",
@@ -222,9 +217,7 @@ fun ThreadListScreen(
                                         duration = SnackbarDuration.Short
                                     )
                                     if (result == SnackbarResult.ActionPerformed) {
-                                        onUnhideThreads(listOf(threadKey))
-                                    } else {
-                                        onDeleteThreads(listOf(threadKey))
+                                        onUndoDeleteThreads(listOf(threadKey))
                                     }
                                 }
                                 true
@@ -273,7 +266,7 @@ fun ThreadListScreen(
                     }
                 }
             }
-            }
+        }
         }
     }
 }
@@ -362,7 +355,6 @@ fun ThreadItem(
                         modifier = Modifier.weight(1f)
                     )
                     
-                    // Fixing B10: Logic wrapped in remember to avoid per-frame calculation
                     val timestampText = remember(thread.timestamp) {
                         val msgTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(thread.timestamp), ZoneId.systemDefault())
                         val now = LocalDateTime.now()

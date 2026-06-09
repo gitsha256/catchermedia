@@ -41,7 +41,8 @@ private const val TAG = "Revive"
 
 class MainActivity : ComponentActivity() {
 
-    private val isPermissionGranted = mutableStateOf(false)
+    private val isNotificationGranted = mutableStateOf(false)
+    private val isStorageGranted = mutableStateOf(false)
     private var showBatteryRationale by mutableStateOf(false)
 
     private val viewModel: MainViewModel by viewModels {
@@ -53,38 +54,56 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Log.d(TAG, "[${Thread.currentThread().name}] MainActivity onCreate")
 
-        // Modern request for Media Permission
+        val sharedPrefs = getSharedPreferences("revive_prefs", Context.MODE_PRIVATE)
+
         val requestMultiplePermissionsLauncher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { permissions ->
-            val granted = permissions.entries.all { it.value }
-            Log.d(TAG, "[${Thread.currentThread().name}] Permissions result: All granted = $granted")
+            val imageGranted = permissions[Manifest.permission.READ_MEDIA_IMAGES] == true
+            val legacyGranted = permissions[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+            
+            val systemCheck = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+            } else {
+                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            }
+
+            val trackingAllowed = imageGranted || legacyGranted || systemCheck
+            isStorageGranted.value = trackingAllowed
+            
+            sharedPrefs.edit().putBoolean("prefs_storage_passed", trackingAllowed).apply()
+            Log.d(TAG, "Storage Request Launcher Callback. Allowed: $trackingAllowed")
         }
 
         val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
         } else {
-            arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            )
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
 
-        if (permissionsToRequest.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
-            Log.d(TAG, "[${Thread.currentThread().name}] Requesting storage permissions")
+        val hasPassedBefore = sharedPrefs.getBoolean("prefs_storage_passed", false)
+        val systemVerification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+        } else {
+            permissionsToRequest.all { 
+                ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED 
+            }
+        }
+        
+        isStorageGranted.value = systemVerification || hasPassedBefore
+
+        if (!systemVerification && !hasPassedBefore) {
             requestMultiplePermissionsLauncher.launch(permissionsToRequest)
         }
 
         setContent {
-            // Using uppercase ReviveTheme here to match your custom theme wrapper
             ReviveTheme {
-                val sharedPrefs = remember { getSharedPreferences("revive_prefs", Context.MODE_PRIVATE) }
-                
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val isGranted by isPermissionGranted
+                    val notificationActive by isNotificationGranted
+                    val storageActive by isStorageGranted
 
                     if (showBatteryRationale) {
                         AlertDialog(
@@ -93,7 +112,7 @@ class MainActivity : ComponentActivity() {
                                 sharedPrefs.edit().putBoolean("prefs_battery_prompt_dismissed", true).apply()
                             },
                             title = { Text("Background Durability") },
-                            text = { Text("To ensure Revive catches deleted messages instantly on this device, please set Battery Usage to 'Unrestricted'.") },
+                            text = { Text("To ensure Revive catches deleted messages instantly, please set Battery Usage to 'Unrestricted'.") },
                             confirmButton = {
                                 TextButton(onClick = {
                                     showBatteryRationale = false
@@ -112,12 +131,25 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    if (!isGranted) {
+                    if (!notificationActive || !storageActive) {
                         PermissionScreen()
                     } else {
+                        val threads by viewModel.threads.collectAsStateWithLifecycle()
                         val threadState by viewModel.selectedThread.collectAsStateWithLifecycle()
                         val selected = threadState
+
                         if (selected != null) {
+                            // BUG FIX: Ensure we only escape if the thread is truly gone (not just loading)
+                            val currentThreadExists = remember(threads, selected) {
+                                if (threads.isEmpty()) true // Don't escape while loading/updating
+                                threads.any { it.packageName == selected.first && it.senderName == selected.second }
+                            }
+
+                            if (!currentThreadExists) {
+                                // Only clear if the user deleted the thread or it was purged
+                                viewModel.clearSelectedThread()
+                            }
+
                             BackHandler(enabled = true) {
                                 viewModel.clearSelectedThread()
                             }
@@ -132,23 +164,24 @@ class MainActivity : ComponentActivity() {
                                     viewModel.deleteMessages(messagesToDelete)
                                 },
                                 onDeleteAllMessages = {
+                                    // Separates clearing individual logs from ripping out the core structural thread row
                                     viewModel.clearMessages(selected.first, selected.second)
+                                    viewModel.clearSelectedThread()
                                 }
                             )
                         } else {
-                            val threads by viewModel.threads.collectAsStateWithLifecycle()
+                            // Wire the state properties straight to the persistent background Coroutine system
                             ThreadListScreen(
                                 threads = threads,
                                 onThreadClick = { packageName, senderName ->
                                     viewModel.selectThread(packageName, senderName)
                                 },
-                                onDeleteThreads = { threadsToDelete ->
-                                    threadsToDelete.forEach { (pkg, sender) ->
-                                        viewModel.deleteThread(pkg, sender)
-                                    }
+                                onDeleteThreadsRequested = { threadsToDelete ->
+                                    viewModel.deleteThreadsDeferred(threadsToDelete)
                                 },
-                                onHideThreads = { viewModel.hideThreads(it) },
-                                onUnhideThreads = { viewModel.unhideThreads(it) }
+                                onUndoDeleteThreads = { threadsToRestore ->
+                                    viewModel.undoDeleteThreads(threadsToRestore)
+                                }
                             )
                         }
                     }
@@ -159,34 +192,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        Log.d(TAG, "[${Thread.currentThread().name}] MainActivity onResume")
-        isPermissionGranted.value = isNotificationServiceEnabled(this)
+        isNotificationGranted.value = isNotificationServiceEnabled(this)
+        
+        val sharedPrefs = getSharedPreferences("revive_prefs", Context.MODE_PRIVATE)
+        val hasPassedBefore = sharedPrefs.getBoolean("prefs_storage_passed", false)
+
+        val systemVerification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE).all {
+                ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        
+        isStorageGranted.value = systemVerification || hasPassedBefore
         checkBatteryOptimizations()
     }
 
     private fun checkBatteryOptimizations() {
-        Log.d(TAG, "[${Thread.currentThread().name}] Starting Battery Optimization check")
         val isDismissed = getSharedPreferences("revive_prefs", Context.MODE_PRIVATE)
             .getBoolean("prefs_battery_prompt_dismissed", false)
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val isIgnoring = powerManager.isIgnoringBatteryOptimizations(packageName)
-        Log.d(TAG, "[${Thread.currentThread().name}] isIgnoringBatteryOptimizations = $isIgnoring")
 
         if (!isIgnoring && !showBatteryRationale && !isDismissed) {
             showBatteryRationale = true
-            Log.d(TAG, "[${Thread.currentThread().name}] Showing battery rationale dialog")
         }
     }
 
     private fun launchBatterySettings() {
         try {
-            Log.d(TAG, "[${Thread.currentThread().name}] Launching battery optimization intent")
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
             }
             startActivity(intent)
         } catch (e: Exception) {
-            Log.w(TAG, "[${Thread.currentThread().name}] Failed to launch direct battery intent, using fallback settings")
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
     }
@@ -194,18 +234,15 @@ class MainActivity : ComponentActivity() {
     private fun isNotificationServiceEnabled(context: Context): Boolean {
         val pkgName = context.packageName
         val flat = Settings.Secure.getString(context.contentResolver, ReviveConstants.ENABLED_NOTIFICATION_LISTENERS)
-        Log.d(TAG, "[${Thread.currentThread().name}] Checking notification listener status. Active listeners: $flat")
         if (!flat.isNullOrEmpty()) {
             val names = flat.split(":")
             for (name in names) {
                 val cn = android.content.ComponentName.unflattenFromString(name)
                 if (cn != null && cn.packageName == pkgName) {
-                    Log.d(TAG, "[${Thread.currentThread().name}] Revive service is currently bound and active")
                     return true
                 }
             }
         }
-        Log.w(TAG, "[${Thread.currentThread().name}] Revive service is NOT enabled in system settings")
         return false
     }
 }

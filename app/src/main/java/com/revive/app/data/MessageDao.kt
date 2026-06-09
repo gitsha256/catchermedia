@@ -18,6 +18,9 @@ interface MessageDao {
     @Query("SELECT * FROM message_logs WHERE packageName = :packageName ORDER BY timestamp DESC LIMIT 1")
     suspend fun findLatestMessageByPackage(packageName: String): MessageLog?
 
+    @Query("SELECT senderName FROM message_logs WHERE packageName = :packageName ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getMostRecentSenderForPackage(packageName: String): String?
+
     // Used for duplicate prevention
     @Query("SELECT * FROM message_logs WHERE packageName = :packageName AND senderName = :senderName ORDER BY timestamp DESC LIMIT 1")
     suspend fun findLatestMessage(packageName: String, senderName: String): MessageLog?
@@ -29,6 +32,9 @@ interface MessageDao {
     // BUG-13 Fix: Order by ASC to ensure chronological stacking in LazyColumn (reverseLayout = true)
     @Query("SELECT * FROM message_logs WHERE packageName = :packageName AND senderName = :senderName ORDER BY timestamp ASC")
     fun getMessagesForThread(packageName: String, senderName: String): Flow<List<MessageLog>>
+
+    @Query("DELETE FROM message_logs WHERE packageName = :packageName AND senderName = :senderName")
+    suspend fun clearMessagesForThread(packageName: String, senderName: String)
 
     @Query("DELETE FROM message_logs WHERE packageName = :packageName AND senderName = :senderName")
     suspend fun deleteThread(packageName: String, senderName: String)

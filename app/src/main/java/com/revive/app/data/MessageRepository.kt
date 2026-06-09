@@ -56,6 +56,11 @@ class MessageRepository(private val messageDao: MessageDao) {
         messageDao.findLatestMessageByPackage(packageName)
     }
 
+    suspend fun getMostRecentSenderForPackage(packageName: String): String? = withContext(Dispatchers.IO) {
+        Log.d(TAG, "[${Thread.currentThread().name}] Repository: getMostRecentSenderForPackage for $packageName")
+        messageDao.getMostRecentSenderForPackage(packageName)
+    }
+
     suspend fun findLatestMessage(packageName: String, senderName: String): MessageLog? = withContext(Dispatchers.IO) {
         Log.d(TAG, "[${Thread.currentThread().name}] Repository: findLatest (Duplicate check) for $senderName")
         messageDao.findLatestMessage(packageName, senderName)
@@ -76,6 +81,15 @@ class MessageRepository(private val messageDao: MessageDao) {
             messageDao.deleteMessages(messages)
         } catch (e: Exception) {
             Log.e(TAG, "[${Thread.currentThread().name}] Repository: Error deleting messages batch", e)
+        }
+    }
+
+    suspend fun clearMessagesForThread(packageName: String, senderName: String) = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "[${Thread.currentThread().name}] Repository: Clearing messages for thread $senderName")
+            messageDao.clearMessagesForThread(packageName, senderName)
+        } catch (e: Exception) {
+            Log.e(TAG, "[${Thread.currentThread().name}] Repository: Error clearing messages for thread $senderName", e)
         }
     }
 

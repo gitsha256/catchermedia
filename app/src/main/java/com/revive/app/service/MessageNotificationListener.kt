@@ -1,9 +1,16 @@
 package com.revive.app.service
 
 import android.app.Notification
+import android.content.Context
+import android.database.ContentObserver
+import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.FileObserver
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -19,7 +26,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import kotlin.math.absoluteValue
 
 private const val TAG = "Revive"
 
@@ -29,7 +42,16 @@ class MessageNotificationListener : NotificationListenerService() {
     private val repository: MessageRepository by lazy {
         (application as ReviveApp).repository
     }
-    private val observers = mutableListOf<FileObserver>()
+
+    /**
+     * Lock striping pool to prevent concurrent duplicate checks and database mutations
+     * for the same conversation partition. Uses a fixed size to avoid memory leaks
+     * while providing high concurrency across different chats.
+     */
+    private val locks = Array(16) { Mutex() }
+    private fun getLock(key: String) = locks[key.hashCode().absoluteValue % locks.size]
+    
+    private var mediaObserver: ContentObserver? = null
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -44,206 +66,236 @@ class MessageNotificationListener : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "[${Thread.currentThread().name}] MessageNotificationListener created")
-        serviceScope.launch {
-            startMediaTracking()
-        }
+        setupMediaStoreObserver()
     }
 
-    private suspend fun startMediaTracking() {
-        Log.d(TAG, "[${Thread.currentThread().name}] Initializing Media Tracking Paths")
-        val root = Environment.getExternalStorageDirectory().absolutePath
-        val basePackages = listOf(PKG_WHATSAPP, PKG_WHATSAPP_BUSINESS)
-        val discoveredPaths = mutableSetOf<String>()
-
-        basePackages.forEach { pkg ->
-            val isW4b = pkg.contains("w4b")
-            val appFolderName = if (isW4b) "WhatsApp Business" else "WhatsApp"
-            val pkgRoot = File("$root/Android/media/$pkg/$appFolderName")
-
-            if (pkgRoot.exists()) {
-                // 1. Standard/Legacy Path
-                val standardPath = File(pkgRoot, "Media/${if (isW4b) "WhatsApp Business Images" else "WhatsApp Images"}")
-                addPathIfValid(standardPath, discoveredPaths)
-
-                // 2. Multi-account/Dual App Path: accounts/{id}/Media/WhatsApp Images
-                val accountsDir = File(pkgRoot, "accounts")
-                if (accountsDir.exists() && accountsDir.isDirectory) {
-                    accountsDir.listFiles()?.filter { it.isDirectory }?.forEach { accountDir ->
-                        val accountMediaPath = File(accountDir, "Media/${if (isW4b) "WhatsApp Business Images" else "WhatsApp Images"}")
-                        addPathIfValid(accountMediaPath, discoveredPaths)
+    private fun setupMediaStoreObserver() {
+        Log.d(TAG, "[${Thread.currentThread().name}] Initializing MediaStore ContentObserver Engine")
+        
+        mediaObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                super.onChange(selfChange, uri)
+                if (uri != null) {
+                    serviceScope.launch {
+                        rescueMediaFromUri(uri)
                     }
                 }
             }
         }
 
-        discoveredPaths.forEach { path ->
-            Log.d(TAG, "[${Thread.currentThread().name}] Attaching FileObserver to: $path")
-            setupObserver(path)
-        }
+        contentResolver.registerContentObserver(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            true,
+            mediaObserver!!
+        )
     }
 
-    private fun addPathIfValid(dir: File, set: MutableSet<String>) {
-        if (dir.exists() && !dir.name.equals("Sent", ignoreCase = true)) {
-            set.add(dir.absolutePath)
-            val privateDir = File(dir, "Private")
-            if (privateDir.exists()) set.add(privateDir.absolutePath)
-        }
-    }
+    private suspend fun rescueMediaFromUri(uri: Uri) {
+        withContext(Dispatchers.IO) {
+            try {
+                val projection = arrayOf(
+                    MediaStore.Images.Media.DATA, 
+                    MediaStore.Images.Media.DISPLAY_NAME
+                )
+                contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val filePathIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA)
+                        val fileNameIdx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                        
+                        val absolutePath = cursor.getString(filePathIdx) ?: return@use
+                        val fileName = cursor.getString(fileNameIdx) ?: "unknown_media.jpg"
 
-    private fun setupObserver(path: String) {
-        val mask = FileObserver.CLOSE_WRITE
-        
-        val observer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            object : FileObserver(File(path), mask) {
-                override fun onEvent(event: Int, fileName: String?) {
-                    processFileEvent(path, event, fileName)
+                        if (absolutePath.contains("Sent", ignoreCase = true)) return@use
+
+                        // CRITICAL: Ignore processing events triggered by our own saves into RescuedMedia
+                        if (absolutePath.contains("RescuedMedia", ignoreCase = true)) {
+                            return@use
+                        }
+
+                        val isWhatsapp = absolutePath.contains("com.whatsapp", ignoreCase = true)
+                        val isWhatsappBiz = absolutePath.contains("com.whatsapp.w4b", ignoreCase = true)
+
+                        if (isWhatsapp || isWhatsappBiz) {
+                            rescueFilePayloadViaUri(
+                                uri, 
+                                fileName, 
+                                if (isWhatsappBiz) PKG_WHATSAPP_BUSINESS else PKG_WHATSAPP
+                            )
+                        }
+                    }
                 }
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            object : FileObserver(path, mask) {
-                override fun onEvent(event: Int, fileName: String?) {
-                    processFileEvent(path, event, fileName)
-                }
-            }
-        }
-        
-        observer.startWatching()
-        observers.add(observer)
-    }
-
-    private fun processFileEvent(path: String, event: Int, fileName: String?) {
-        // Strict guard: Ignore events if the directory being watched is a "Sent" folder
-        if (File(path).name.equals("Sent", ignoreCase = true)) return
-
-        if (fileName != null && !fileName.startsWith(".") &&
-            (fileName.lowercase().endsWith(".jpg") ||
-                    fileName.lowercase().endsWith(".jpeg") ||
-                    fileName.lowercase().endsWith(".png"))) {
-
-            Log.d(TAG, "[${Thread.currentThread().name}] Media detected! Event: $event, File: $fileName")
-            serviceScope.launch {
-                rescueFile(path, fileName)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing MediaStore content stream", e)
             }
         }
     }
 
-    private suspend fun rescueFile(parentPath: String, fileName: String) {
+    private suspend fun rescueFilePayloadViaUri(sourceUri: Uri, fileName: String, sourcePkg: String) {
+        var pfd: ParcelFileDescriptor? = null
         try {
-            val sourceFile = File(parentPath, fileName)
-            val rescueFolder = File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "RescuedMedia")
-            
+            // Target Shared Public Storage Path directory layout tree
+            val publicPicturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            val rescueFolder = File(publicPicturesDir, "RescuedMedia")
             if (!rescueFolder.exists()) {
                 rescueFolder.mkdirs()
             }
 
-        val destinationFile = File(rescueFolder, "rescued_${System.currentTimeMillis()}_$fileName")
-        Log.d(TAG, "[${Thread.currentThread().name}] Media rescue started. Source: ${sourceFile.absolutePath} -> Target: ${destinationFile.absolutePath}")
-
-            // Filter out 0-byte or tiny outgoing upload placeholders/thumbnails
-            if (!sourceFile.exists() || sourceFile.length() < 1024) {
-                Log.w(TAG, "[${Thread.currentThread().name}] Rescue aborted: File too small or missing (${sourceFile.length()} bytes)")
+            val destinationFile = File(rescueFolder, "rescued_${fileName}")
+            
+            // Deduplication Guard: Terminate process if duplicate item mapping is tracked on disk
+            if (destinationFile.exists() && destinationFile.length() > 0) {
                 return
             }
+
+            var retries = 0
+            var openedSuccessfully = false
             
-            sourceFile.inputStream().use { input ->
-                destinationFile.outputStream().use { output ->
+            while (retries < 6 && !openedSuccessfully) {
+                try {
+                    pfd = contentResolver.openFileDescriptor(sourceUri, "r")
+                    if (pfd != null && pfd.statSize > 1024) {
+                        openedSuccessfully = true
+                    } else {
+                        pfd?.close()
+                        delay(250)
+                        retries++
+                    }
+                } catch (e: Exception) {
+                    pfd?.close()
+                    delay(300)
+                    retries++
+                }
+            }
+
+            if (!openedSuccessfully || pfd == null) {
+                return
+            }
+
+            FileInputStream(pfd.fileDescriptor).use { input ->
+                FileOutputStream(destinationFile).use { output ->
                     input.copyTo(output)
                 }
             }
 
             val finalPath = destinationFile.absolutePath
+            Log.d(TAG, "File safely cloned to public directory: $finalPath")
 
-            // Identify source package based on path
-            val sourcePkg = if (parentPath.contains("w4b")) PKG_WHATSAPP_BUSINESS else PKG_WHATSAPP
+            // Broadcast asset information update directly to system index frameworks
+            MediaScannerConnection.scanFile(
+                applicationContext,
+                arrayOf(finalPath),
+                arrayOf("image/jpeg"),
+                object : MediaScannerConnection.OnScanCompletedListener {
+                    override fun onScanCompleted(path: String?, uri: Uri?) {
+                        Log.d(TAG, "MediaScanner complete: indexed entry -> $uri")
+                    }
+                }
+            )
 
-            // Heuristic: Associate this file with the most recent sender from this package
-            val lastNotification = repository.findLatestMessageByPackage(sourcePkg)
-            val probableSender = lastNotification?.senderName ?: "Media Interceptor"
+            // ATOMIC RESOLUTION: Resolve sender with DB polling and real-time notification fallback
+            val resolvedSender = resolveSenderWithRetry(sourcePkg)
 
-            // Log to Room as a special media entry
             val mediaLog = MessageLog(
-                packageName = sourcePkg,
-                senderName = probableSender,
+                packageName = sourcePkg.trim(),
+                senderName = resolvedSender.trim(),
                 messageText = "📷 Rescued Photo ($fileName)",
-                timestamp = System.currentTimeMillis(),
-                mediaPath = finalPath
+                timestamp = System.currentTimeMillis(), // Enforce fresh clock for media
+                mediaPath = finalPath,
+                isDeleted = false
             )
             repository.insertMessage(mediaLog)
-            Log.d(TAG, "[${Thread.currentThread().name}] Media rescue successful. Size: ${destinationFile.length()} bytes")
 
         } catch (e: Exception) {
-            Log.e(TAG, "[${Thread.currentThread().name}] CRITICAL: Media rescue failed", e)
+            Log.e(TAG, "CRITICAL: Media stream cloning engine pipeline crash", e)
+        } finally {
+            try { pfd?.close() } catch (ignored: Exception) {}
         }
+    }
+
+    /**
+     * Implements a non-blocking retry loop to wait for the notification system to catch up.
+     * This prevents media from being assigned to "Unknown Sender" when the file observer
+     * triggers slightly before the text notification is persisted.
+     */
+    private suspend fun resolveSenderWithRetry(packageName: String): String {
+        val cleanPkg = packageName.trim()
+        repeat(6) { attempt ->
+            // 1. Search database for the most recent sender in this app
+            val sender = repository.getMostRecentSenderForPackage(cleanPkg)
+            if (sender != null) return sender
+            
+            // 2. Real-time fallback: Inspect current active notifications to find the sender
+            val activeSender = try {
+                getActiveNotifications()?.firstOrNull { 
+                    it.packageName == cleanPkg && 
+                    (it.notification.flags and Notification.FLAG_GROUP_SUMMARY) == 0 
+                }?.notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
+            } catch (e: Exception) { null }
+
+            if (!activeSender.isNullOrEmpty() && 
+                !activeSender.equals("WhatsApp", true) && 
+                !activeSender.equals("Telegram", true)) {
+                return activeSender
+            }
+
+            Log.d(TAG, "Media Intercept: Resolving sender identity (Attempt ${attempt + 1}/6)")
+            delay(500) // 500ms intervals * 6 = 3.0s window
+        }
+        Log.w(TAG, "Media Intercept: No matching sender found in 3s window. Falling back to Unknown.")
+        return "Unknown Sender"
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
-        if (sbn == null) {
-            Log.w(TAG, "[${Thread.currentThread().name}] onNotificationPosted: sbn is null")
-            return
-        }
+        if (sbn == null) return
 
-        val packageName = sbn.packageName
-        if (!ReviveConstants.TARGET_PACKAGES.contains(packageName)) {
-            Log.d(TAG, "[${Thread.currentThread().name}] Ignored notification from: $packageName")
-            return
-        }
+        val packageName = sbn.packageName.trim()
+        if (!ReviveConstants.TARGET_PACKAGES.contains(packageName)) return
 
         val extras = sbn.notification.extras ?: return
-        Log.d(TAG, "[${Thread.currentThread().name}] Received from $packageName. Extras keys: ${extras.keySet()}")
-
-        // Skip ongoing/system notifications like calls, uploads, persistent notifications
-        if (sbn.isOngoing) {
-            Log.d(TAG, "[${Thread.currentThread().name}] Skipping ongoing notification")
-            return
-        }
-
-        // Skip group summary notifications (e.g., "3 new messages") 
-        // to avoid saving redundant or empty data.
+        if (sbn.isOngoing) return
         if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
 
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
 
-        // Validation safeguards
         if (title.isNullOrEmpty() || text.isNullOrEmpty()) return
 
-        // Filter out system utility messages
         val lowerText = text.lowercase()
-        if (ReviveConstants.EXCLUDED_TEXTS.any { lowerText.contains(it) }) {
-            Log.d(TAG, "[${Thread.currentThread().name}] Filtered excluded utility text: $text")
-            return
-        }
+        if (ReviveConstants.EXCLUDED_TEXTS.any { lowerText.contains(it) }) return
         
-        val isSystemStatus = (title.equals("WhatsApp", true) || title.equals("Telegram", true)) &&
-                (lowerText.contains("checking") || lowerText.contains("incoming") || lowerText.contains("running"))
-        if (isSystemStatus) return
+        if ((title.equals("WhatsApp", true) || title.equals("Telegram", true)) &&
+            (lowerText.contains("checking") || lowerText.contains("incoming") || lowerText.contains("running"))) return
 
         val timestamp = sbn.postTime
+        val lockKey = "$packageName:${title.lowercase()}"
+        val mutex = getLock(lockKey)
 
         serviceScope.launch {
-            try {
+            // THREAD-SAFE SYNC: Use a mutex to ensure duplicate checks and inserts are atomic per chat
+            mutex.withLock {
+                try {
                 val isDeletionMessage = ReviveConstants.DELETION_KEYWORDS.any { lowerText.contains(it) }
 
                 if (isDeletionMessage) {
-                    Log.d(TAG, "[${Thread.currentThread().name}] Deletion detected in $packageName from $title")
-                    // Look back 5 minutes (300,000 ms) for the latest message in this thread
                     val timeLimit = timestamp - 300_000
                     val lastMsg = repository.findLastMessageForDeletion(
                         packageName = packageName,
-                        senderName = title,
+                        senderName = title.trim(),
                         timeLimit = timeLimit
                     )
 
                     if (lastMsg != null) {
+                        Log.d(TAG, "Thread-Safe: Marking message as deleted for $title")
                         repository.markMessageAsDeleted(lastMsg.id)
                     }
                 } else {
-                    // Check duplicate prevention within last 15 seconds
-                    val latestMsg = repository.findLatestMessage(packageName, title)
+                    val cleanTitle = title.trim()
+                    val latestMsg = repository.findLatestMessage(packageName, cleanTitle)
+                    // DUPLICATE SUPPRESSION: Removed isPhotoAlert exception to prevent burst logging.
+                    // Also checks if current text is already contained in the last message (e.g., "Photo" vs "Rescued Photo").
                     val isDuplicate = latestMsg != null &&
-                            latestMsg.messageText == text &&
+                            (latestMsg.messageText == text || latestMsg.messageText.contains(text, ignoreCase = true)) &&
                             (timestamp - latestMsg.timestamp) < 15_000
 
                     if (!isDuplicate) {
@@ -254,22 +306,22 @@ class MessageNotificationListener : NotificationListenerService() {
                             timestamp = timestamp,
                             isDeleted = false
                         )
+                        Log.d(TAG, "Thread-Safe: Inserting unique message from $title")
                         repository.insertMessage(messageLog)
                     } else {
-                        Log.d(TAG, "[${Thread.currentThread().name}] Duplicate notification ignored for $title")
+                        Log.d(TAG, "Thread-Safe: Suppressed duplicate notification for $title")
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "[${Thread.currentThread().name}] Error processing notification", e)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error handling logging data injection", e)
+                }
             }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "[${Thread.currentThread().name}] MessageNotificationListener onDestroy")
-        observers.forEach { it.stopWatching() }
-        observers.clear()
+        mediaObserver?.let { contentResolver.unregisterContentObserver(it) }
         serviceScope.cancel()
     }
 }

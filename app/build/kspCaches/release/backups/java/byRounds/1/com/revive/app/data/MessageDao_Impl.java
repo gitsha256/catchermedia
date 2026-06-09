@@ -39,7 +39,7 @@ public final class MessageDao_Impl implements MessageDao {
 
   private final SharedSQLiteStatement __preparedStmtOfMarkMessageAsDeleted;
 
-  private final SharedSQLiteStatement __preparedStmtOfDeleteThread;
+  private final SharedSQLiteStatement __preparedStmtOfClearMessagesForThread;
 
   private final SharedSQLiteStatement __preparedStmtOfNukeTable;
 
@@ -90,7 +90,7 @@ public final class MessageDao_Impl implements MessageDao {
         return _query;
       }
     };
-    this.__preparedStmtOfDeleteThread = new SharedSQLiteStatement(__db) {
+    this.__preparedStmtOfClearMessagesForThread = new SharedSQLiteStatement(__db) {
       @Override
       @NonNull
       public String createQuery() {
@@ -172,13 +172,13 @@ public final class MessageDao_Impl implements MessageDao {
   }
 
   @Override
-  public Object deleteThread(final String packageName, final String senderName,
+  public Object clearMessagesForThread(final String packageName, final String senderName,
       final Continuation<? super Unit> $completion) {
     return CoroutinesRoom.execute(__db, true, new Callable<Unit>() {
       @Override
       @NonNull
       public Unit call() throws Exception {
-        final SupportSQLiteStatement _stmt = __preparedStmtOfDeleteThread.acquire();
+        final SupportSQLiteStatement _stmt = __preparedStmtOfClearMessagesForThread.acquire();
         int _argIndex = 1;
         _stmt.bindString(_argIndex, packageName);
         _argIndex = 2;
@@ -193,7 +193,35 @@ public final class MessageDao_Impl implements MessageDao {
             __db.endTransaction();
           }
         } finally {
-          __preparedStmtOfDeleteThread.release(_stmt);
+          __preparedStmtOfClearMessagesForThread.release(_stmt);
+        }
+      }
+    }, $completion);
+  }
+
+  @Override
+  public Object deleteThread(final String packageName, final String senderName,
+      final Continuation<? super Unit> $completion) {
+    return CoroutinesRoom.execute(__db, true, new Callable<Unit>() {
+      @Override
+      @NonNull
+      public Unit call() throws Exception {
+        final SupportSQLiteStatement _stmt = __preparedStmtOfClearMessagesForThread.acquire();
+        int _argIndex = 1;
+        _stmt.bindString(_argIndex, packageName);
+        _argIndex = 2;
+        _stmt.bindString(_argIndex, senderName);
+        try {
+          __db.beginTransaction();
+          try {
+            _stmt.executeUpdateDelete();
+            __db.setTransactionSuccessful();
+            return Unit.INSTANCE;
+          } finally {
+            __db.endTransaction();
+          }
+        } finally {
+          __preparedStmtOfClearMessagesForThread.release(_stmt);
         }
       }
     }, $completion);
@@ -326,6 +354,39 @@ public final class MessageDao_Impl implements MessageDao {
               _tmpMediaPath = _cursor.getString(_cursorIndexOfMediaPath);
             }
             _result = new MessageLog(_tmpId,_tmpPackageName,_tmpSenderName,_tmpMessageText,_tmpTimestamp,_tmpIsDeleted,_tmpMediaPath);
+          } else {
+            _result = null;
+          }
+          return _result;
+        } finally {
+          _cursor.close();
+          _statement.release();
+        }
+      }
+    }, $completion);
+  }
+
+  @Override
+  public Object getMostRecentSenderForPackage(final String packageName,
+      final Continuation<? super String> $completion) {
+    final String _sql = "SELECT senderName FROM message_logs WHERE packageName = ? ORDER BY timestamp DESC LIMIT 1";
+    final RoomSQLiteQuery _statement = RoomSQLiteQuery.acquire(_sql, 1);
+    int _argIndex = 1;
+    _statement.bindString(_argIndex, packageName);
+    final CancellationSignal _cancellationSignal = DBUtil.createCancellationSignal();
+    return CoroutinesRoom.execute(__db, false, _cancellationSignal, new Callable<String>() {
+      @Override
+      @Nullable
+      public String call() throws Exception {
+        final Cursor _cursor = DBUtil.query(__db, _statement, false, null);
+        try {
+          final String _result;
+          if (_cursor.moveToFirst()) {
+            if (_cursor.isNull(0)) {
+              _result = null;
+            } else {
+              _result = _cursor.getString(0);
+            }
           } else {
             _result = null;
           }
