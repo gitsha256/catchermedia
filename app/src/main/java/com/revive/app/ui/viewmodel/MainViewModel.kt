@@ -3,7 +3,7 @@ package com.revive.app.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.revive.app.data.MessageDao
+import com.revive.app.data.MessageRepository
 import com.revive.app.data.MessageLog
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -18,14 +18,14 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 
 
-class MainViewModel(private val messageDao: MessageDao) : ViewModel() {
+class MainViewModel(private val repository: MessageRepository) : ViewModel() {
 
     private val _hiddenThreads = MutableStateFlow<Set<Pair<String, String>>>(emptySet())
 
     // Fixing B8 & B17: Filter out threads currently in the "Undo" pending state
     @OptIn(ExperimentalCoroutinesApi::class)
     val threads: StateFlow<List<MessageLog>> = combine(
-        messageDao.getAllThreads(),
+        repository.getAllThreads(),
         _hiddenThreads
     ) { allThreads, hidden ->
         allThreads.filter { (it.packageName to it.senderName) !in hidden }
@@ -45,7 +45,7 @@ class MainViewModel(private val messageDao: MessageDao) : ViewModel() {
             if (selected == null) {
                 flowOf(emptyList())
             } else {
-                messageDao.getMessagesForThread(selected.first, selected.second)
+                repository.getMessagesForThread(selected.first, selected.second)
             }
         }
         .stateIn(
@@ -72,27 +72,27 @@ class MainViewModel(private val messageDao: MessageDao) : ViewModel() {
 
     fun deleteMessages(messages: List<MessageLog>) {
         viewModelScope.launch(Dispatchers.IO) {
-            messageDao.deleteMessages(messages)
+            repository.deleteMessages(messages)
         }
     }
 
     fun deleteThread(packageName: String, senderName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            messageDao.deleteThread(packageName, senderName)
+            repository.deleteThread(packageName, senderName)
         }
     }
 
     fun clearMessages(packageName: String, senderName: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            messageDao.deleteThread(packageName, senderName)
+            repository.deleteThread(packageName, senderName)
         }
     }
 
-    class Factory(private val messageDao: MessageDao) : ViewModelProvider.Factory {
+    class Factory(private val repository: MessageRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
-                return MainViewModel(messageDao) as T
+                return MainViewModel(repository) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

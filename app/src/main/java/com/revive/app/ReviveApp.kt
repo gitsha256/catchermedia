@@ -2,9 +2,7 @@ package com.revive.app
 
 import android.app.Application
 import com.revive.app.data.AppDatabase
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import com.revive.app.data.MessageRepository
 
 class ReviveApp : Application() {
     
@@ -13,11 +11,11 @@ class ReviveApp : Application() {
         AppDatabase.getDatabase(this) 
     }
 
+    val repository: MessageRepository by lazy {
+        MessageRepository(database.messageDao())
+    }
+
     override fun onCreate() {
         super.onCreate()
-        // Pre-warm database instance in background to avoid skipping frames on startup
-        CoroutineScope(Dispatchers.IO).launch {
-            AppDatabase.getDatabase(this@ReviveApp)
-        }
     }
 }

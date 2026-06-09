@@ -1,15 +1,19 @@
 package com.revive.app.service
 
 import android.app.Notification
-import android.media.MediaScannerConnection
+import android.content.ContentValues
 import android.os.Environment
 import android.os.FileObserver
+import android.provider.MediaStore
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import com.revive.app.data.AppDatabase
-import com.revive.app.data.MessageDao
+import com.revive.app.ReviveApp
+import com.revive.app.data.MessageRepository
 import com.revive.app.data.MessageLog
+import com.revive.app.util.ReviveConstants
+import com.revive.app.util.ReviveConstants.PKG_WHATSAPP
+import com.revive.app.util.ReviveConstants.PKG_WHATSAPP_BUSINESS
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,38 +25,10 @@ import java.io.File
 class MessageNotificationListener : NotificationListenerService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val database: AppDatabase by lazy { 
-        AppDatabase.getDatabase(applicationContext) 
+    private val repository: MessageRepository by lazy {
+        (application as ReviveApp).repository
     }
     private val observers = mutableListOf<FileObserver>()
-
-    private val targetPackages = setOf(
-        "com.whatsapp",
-        "com.whatsapp.w4b",
-        "com.telegram.messenger",
-        "org.thunderdog.challegram"
-    )
-
-    private val excludedTexts = listOf(
-        "checking for new messages",
-        "media downloading",
-        "finished downloading",
-        "whatsapp web is active",
-        "backup in progress",
-        "whatsapp web",
-        "backup",
-        "restoring chat history",
-        "connecting...",
-        "updating...",
-        "telegram is running"
-    )
-
-    private val deletionKeywords = listOf(
-        "this message was deleted",
-        "message was deleted",
-        "you deleted this message",
-        "message deleted"
-    )
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -66,12 +42,14 @@ class MessageNotificationListener : NotificationListenerService() {
 
     override fun onCreate() {
         super.onCreate()
-        startMediaTracking()
+        serviceScope.launch {
+            startMediaTracking()
+        }
     }
 
-    private fun startMediaTracking() {
+    private suspend fun startMediaTracking() {
         val root = Environment.getExternalStorageDirectory().absolutePath
-        val basePackages = listOf("com.whatsapp", "com.whatsapp.w4b")
+        val basePackages = listOf(PKG_WHATSAPP, PKG_WHATSAPP_BUSINESS)
         val discoveredPaths = mutableSetOf<String>()
 
         basePackages.forEach { pkg ->
@@ -140,31 +118,40 @@ class MessageNotificationListener : NotificationListenerService() {
             val sourceFile = File(parentPath, fileName)
             // Filter out 0-byte or tiny outgoing upload placeholders/thumbnails
             if (!sourceFile.exists() || sourceFile.length() < 1024) return
-
-            val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Revive").apply { mkdirs() }
-            val destFile = File(publicDir, "rescued_${System.currentTimeMillis()}_$fileName")
-
-            // Immediate copy to secure internal storage
-            sourceFile.inputStream().use { input ->
-                destFile.outputStream().use { output ->
-                    input.copyTo(output)
+            
+            // Modern Scoped Storage compliant saving using MediaStore
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, "rescued_${System.currentTimeMillis()}_$fileName")
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/${ReviveConstants.RESCUE_DIRECTORY}")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
             }
 
-            // Trigger MediaScanner so the file appears in Gallery/Photos apps immediately
-            MediaScannerConnection.scanFile(
-                applicationContext,
-                arrayOf(destFile.absolutePath),
-                null
-            ) { path, uri ->
-                Log.d("MediaRescue", "Media scan finished. File successfully indexed.")
+            val contentResolver = applicationContext.contentResolver
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            
+            var finalPath = ""
+            uri?.let { targetUri ->
+                contentResolver.openOutputStream(targetUri)?.use { output ->
+                    sourceFile.inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    contentResolver.update(targetUri, contentValues, null, null)
+                }
+                finalPath = targetUri.toString()
             }
 
             // Identify source package based on path
-            val sourcePkg = if (parentPath.contains("w4b")) "com.whatsapp.w4b" else "com.whatsapp"
+            val sourcePkg = if (parentPath.contains("w4b")) PKG_WHATSAPP_BUSINESS else PKG_WHATSAPP
 
             // Heuristic: Associate this file with the most recent sender from this package
-            val lastNotification = database.messageDao().findLatestMessageByPackage(sourcePkg)
+            val lastNotification = repository.findLatestMessageByPackage(sourcePkg)
             val probableSender = lastNotification?.senderName ?: "Media Interceptor"
 
             // Log to Room as a special media entry
@@ -173,9 +160,9 @@ class MessageNotificationListener : NotificationListenerService() {
                 senderName = probableSender,
                 messageText = "📷 Rescued Photo ($fileName)",
                 timestamp = System.currentTimeMillis(),
-                mediaPath = destFile.absolutePath
+                mediaPath = finalPath
             )
-            database.messageDao().insertMessage(mediaLog)
+            repository.insertMessage(mediaLog)
             Log.d("MediaRescue", "Successfully rescued incoming media file.")
 
         } catch (e: Exception) {
@@ -188,7 +175,7 @@ class MessageNotificationListener : NotificationListenerService() {
         if (sbn == null) return
 
         val packageName = sbn.packageName
-        if (!targetPackages.contains(packageName)) return
+        if (!ReviveConstants.TARGET_PACKAGES.contains(packageName)) return
 
         // Skip ongoing/system notifications like calls, uploads, persistent notifications
         if (sbn.isOngoing) return
@@ -206,7 +193,7 @@ class MessageNotificationListener : NotificationListenerService() {
 
         // Filter out system utility messages
         val lowerText = text.lowercase()
-        if (excludedTexts.any { lowerText.contains(it) }) return
+        if (ReviveConstants.EXCLUDED_TEXTS.any { lowerText.contains(it) }) return
         
         val isSystemStatus = (title.equals("WhatsApp", true) || title.equals("Telegram", true)) &&
                 (lowerText.contains("checking") || lowerText.contains("incoming") || lowerText.contains("running"))
@@ -216,24 +203,24 @@ class MessageNotificationListener : NotificationListenerService() {
 
         serviceScope.launch {
             try {
-                val isDeletionMessage = deletionKeywords.any { lowerText.contains(it) }
+                val isDeletionMessage = ReviveConstants.DELETION_KEYWORDS.any { lowerText.contains(it) }
 
                 if (isDeletionMessage) {
                     // Look back 5 minutes (300,000 ms) for the latest message in this thread
                     val timeLimit = timestamp - 300_000
-                    val lastMsg = database.messageDao().findLastMessageForDeletion(
+                    val lastMsg = repository.findLastMessageForDeletion(
                         packageName = packageName,
                         senderName = title,
                         timeLimit = timeLimit
                     )
 
                     if (lastMsg != null) {
-                        database.messageDao().markMessageAsDeleted(lastMsg.id)
+                        repository.markMessageAsDeleted(lastMsg.id)
                         Log.d("MessageNotification", "Flagged message as deleted (ID: ${lastMsg.id})")
                     }
                 } else {
                     // Check duplicate prevention within last 15 seconds
-                    val latestMsg = database.messageDao().findLatestMessage(packageName, title)
+                    val latestMsg = repository.findLatestMessage(packageName, title)
                     val isDuplicate = latestMsg != null &&
                             latestMsg.messageText == text &&
                             (timestamp - latestMsg.timestamp) < 15_000
@@ -246,7 +233,7 @@ class MessageNotificationListener : NotificationListenerService() {
                             timestamp = timestamp,
                             isDeleted = false
                         )
-                        database.messageDao().insertMessage(messageLog)
+                        repository.insertMessage(messageLog)
                         Log.i("MessageNotification", "New notification processed and stored locally.")
                     } else {
                         Log.d("MessageNotification", "Duplicate notification ignored.")
