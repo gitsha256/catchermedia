@@ -398,7 +398,7 @@ public final class MessageDao_Impl implements MessageDao {
 
   @Override
   public Flow<List<MessageLog>> getAllThreads() {
-    final String _sql = "SELECT * FROM message_logs WHERE timestamp IN (SELECT MAX(timestamp) FROM message_logs GROUP BY packageName, senderName) ORDER BY timestamp DESC";
+    final String _sql = "SELECT m1.* FROM message_logs m1 INNER JOIN (SELECT packageName, senderName, MAX(timestamp) as maxTs FROM message_logs GROUP BY packageName, senderName) m2 ON m1.packageName = m2.packageName AND m1.senderName = m2.senderName AND m1.timestamp = m2.maxTs ORDER BY m1.timestamp DESC";
     final RoomSQLiteQuery _statement = RoomSQLiteQuery.acquire(_sql, 0);
     return CoroutinesRoom.createFlow(__db, false, new String[] {"message_logs"}, new Callable<List<MessageLog>>() {
       @Override
@@ -455,7 +455,7 @@ public final class MessageDao_Impl implements MessageDao {
   @Override
   public Flow<List<MessageLog>> getMessagesForThread(final String packageName,
       final String senderName) {
-    final String _sql = "SELECT * FROM message_logs WHERE packageName = ? AND senderName = ? ORDER BY timestamp DESC";
+    final String _sql = "SELECT * FROM message_logs WHERE packageName = ? AND senderName = ? ORDER BY timestamp ASC";
     final RoomSQLiteQuery _statement = RoomSQLiteQuery.acquire(_sql, 2);
     int _argIndex = 1;
     _statement.bindString(_argIndex, packageName);

@@ -22,12 +22,12 @@ interface MessageDao {
     @Query("SELECT * FROM message_logs WHERE packageName = :packageName AND senderName = :senderName ORDER BY timestamp DESC LIMIT 1")
     suspend fun findLatestMessage(packageName: String, senderName: String): MessageLog?
 
-    // Optimized: Returns the latest message for every unique chat thread
-    @Query("SELECT * FROM message_logs WHERE timestamp IN (SELECT MAX(timestamp) FROM message_logs GROUP BY packageName, senderName) ORDER BY timestamp DESC")
+    // BUG-05 Fix: Use Inner Join to retrieve the full row for the latest message per thread
+    @Query("SELECT m1.* FROM message_logs m1 INNER JOIN (SELECT packageName, senderName, MAX(timestamp) as maxTs FROM message_logs GROUP BY packageName, senderName) m2 ON m1.packageName = m2.packageName AND m1.senderName = m2.senderName AND m1.timestamp = m2.maxTs ORDER BY m1.timestamp DESC")
     fun getAllThreads(): Flow<List<MessageLog>>
 
-    // Returns the full conversation for a specific sender
-    @Query("SELECT * FROM message_logs WHERE packageName = :packageName AND senderName = :senderName ORDER BY timestamp DESC")
+    // BUG-13 Fix: Order by ASC to ensure chronological stacking in LazyColumn (reverseLayout = true)
+    @Query("SELECT * FROM message_logs WHERE packageName = :packageName AND senderName = :senderName ORDER BY timestamp ASC")
     fun getMessagesForThread(packageName: String, senderName: String): Flow<List<MessageLog>>
 
     @Query("DELETE FROM message_logs WHERE packageName = :packageName AND senderName = :senderName")

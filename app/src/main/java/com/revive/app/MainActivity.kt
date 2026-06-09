@@ -10,6 +10,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.result.contract.ActivityResultContracts
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -22,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -35,6 +37,8 @@ import com.revive.app.ui.theme.ReviveTheme
 import com.revive.app.ui.viewmodel.MainViewModel
 import com.revive.app.util.ReviveConstants
 
+private const val TAG = "Revive"
+
 class MainActivity : ComponentActivity() {
 
     private val isPermissionGranted = mutableStateOf(false)
@@ -45,17 +49,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        Log.d(TAG, "[${Thread.currentThread().name}] MainActivity onCreate")
 
         // Modern request for Media Permission
         val requestMultiplePermissionsLauncher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { permissions ->
             val granted = permissions.entries.all { it.value }
-            if (!granted) {
-                // Optional: Inform user that media rescue features may be limited
-            }
+            Log.d(TAG, "[${Thread.currentThread().name}] Permissions result: All granted = $granted")
         }
 
         val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -68,12 +71,15 @@ class MainActivity : ComponentActivity() {
         }
 
         if (permissionsToRequest.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
+            Log.d(TAG, "[${Thread.currentThread().name}] Requesting storage permissions")
             requestMultiplePermissionsLauncher.launch(permissionsToRequest)
         }
 
         setContent {
             // Using uppercase ReviveTheme here to match your custom theme wrapper
             ReviveTheme {
+                val sharedPrefs = remember { getSharedPreferences("revive_prefs", Context.MODE_PRIVATE) }
+                
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -82,17 +88,24 @@ class MainActivity : ComponentActivity() {
 
                     if (showBatteryRationale) {
                         AlertDialog(
-                            onDismissRequest = { showBatteryRationale = false },
+                            onDismissRequest = { 
+                                showBatteryRationale = false
+                                sharedPrefs.edit().putBoolean("prefs_battery_prompt_dismissed", true).apply()
+                            },
                             title = { Text("Background Durability") },
                             text = { Text("To ensure Revive catches deleted messages instantly on this device, please set Battery Usage to 'Unrestricted'.") },
                             confirmButton = {
                                 TextButton(onClick = {
                                     showBatteryRationale = false
+                                    sharedPrefs.edit().putBoolean("prefs_battery_prompt_dismissed", true).apply()
                                     launchBatterySettings()
                                 }) { Text("Settings") }
                             },
                             dismissButton = {
-                                TextButton(onClick = { showBatteryRationale = false }) {
+                                TextButton(onClick = { 
+                                    showBatteryRationale = false 
+                                    sharedPrefs.edit().putBoolean("prefs_battery_prompt_dismissed", true).apply()
+                                }) {
                                     Text("Maybe Later")
                                 }
                             }
@@ -146,24 +159,34 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        Log.d(TAG, "[${Thread.currentThread().name}] MainActivity onResume")
         isPermissionGranted.value = isNotificationServiceEnabled(this)
         checkBatteryOptimizations()
     }
 
     private fun checkBatteryOptimizations() {
+        Log.d(TAG, "[${Thread.currentThread().name}] Starting Battery Optimization check")
+        val isDismissed = getSharedPreferences("revive_prefs", Context.MODE_PRIVATE)
+            .getBoolean("prefs_battery_prompt_dismissed", false)
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (!powerManager.isIgnoringBatteryOptimizations(packageName) && !showBatteryRationale) {
+        val isIgnoring = powerManager.isIgnoringBatteryOptimizations(packageName)
+        Log.d(TAG, "[${Thread.currentThread().name}] isIgnoringBatteryOptimizations = $isIgnoring")
+
+        if (!isIgnoring && !showBatteryRationale && !isDismissed) {
             showBatteryRationale = true
+            Log.d(TAG, "[${Thread.currentThread().name}] Showing battery rationale dialog")
         }
     }
 
     private fun launchBatterySettings() {
         try {
+            Log.d(TAG, "[${Thread.currentThread().name}] Launching battery optimization intent")
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
             }
             startActivity(intent)
         } catch (e: Exception) {
+            Log.w(TAG, "[${Thread.currentThread().name}] Failed to launch direct battery intent, using fallback settings")
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
     }
@@ -171,15 +194,18 @@ class MainActivity : ComponentActivity() {
     private fun isNotificationServiceEnabled(context: Context): Boolean {
         val pkgName = context.packageName
         val flat = Settings.Secure.getString(context.contentResolver, ReviveConstants.ENABLED_NOTIFICATION_LISTENERS)
+        Log.d(TAG, "[${Thread.currentThread().name}] Checking notification listener status. Active listeners: $flat")
         if (!flat.isNullOrEmpty()) {
             val names = flat.split(":")
             for (name in names) {
                 val cn = android.content.ComponentName.unflattenFromString(name)
                 if (cn != null && cn.packageName == pkgName) {
+                    Log.d(TAG, "[${Thread.currentThread().name}] Revive service is currently bound and active")
                     return true
                 }
             }
         }
+        Log.w(TAG, "[${Thread.currentThread().name}] Revive service is NOT enabled in system settings")
         return false
     }
 }
